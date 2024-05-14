@@ -23,6 +23,14 @@ func (cp *ClientPool) Add(name string, client Client) error {
 	return nil
 }
 
+func (cp *ClientPool) Update(name string, client Client) error {
+	if _, ok := cp.Pool[name]; !ok {
+		return ClientUnknown
+	}
+	cp.Pool[name] = client
+	return nil
+}
+
 func (cp *ClientPool) Remove(client string) error {
 	if _, ok := cp.Pool[client]; !ok {
 		return ClientUnknown

@@ -30,7 +30,7 @@ func (m *EventManager) ClientSatAtTheDesk(deskNum int, name string, currentTime 
 	if err != nil {
 		return err
 	}
-	err = m.ClientPool.Add(name, Client{
+	err = m.ClientPool.Update(name, Client{
 		Desk:    deskNum,
 		AtQueue: false,
 	})

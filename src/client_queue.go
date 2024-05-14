@@ -16,7 +16,7 @@ func NewClientListQueue() ClientQueue {
 }
 
 func (q *ClientQueue) Enqueue(name string) error {
-	if q.Queue.Len() >= q.QueueSize {
+	if q.Queue.Len() > q.QueueSize {
 		return QueueIsFull
 	}
 	q.Queue.PushBack(name)
@@ -24,12 +24,12 @@ func (q *ClientQueue) Enqueue(name string) error {
 }
 
 func (q *ClientQueue) Dequeue() (string, bool) {
-	name := q.Queue.Front().Value
+	name := q.Queue.Front()
 	if name == nil {
 		return "", false
 	}
 	q.Queue.Remove(q.Queue.Front())
-	return name.(string), true
+	return name.Value.(string), true
 }
 
 func (q *ClientQueue) Remove(name string) error {

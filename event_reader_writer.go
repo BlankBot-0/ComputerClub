@@ -66,7 +66,8 @@ func (e *EventReaderWriter) ReadEvent(eventStr string) (string, error) {
 		return "", err
 	}
 	if eventTime.Before(e.OpeningTime) || eventTime.After(e.ClosingTime) {
-		return "", src.NotOpenYet
+		sideEffect := fmt.Sprintf(" %d %s\n", 13, src.NotOpenYet)
+		return eventTime.Format(HHMM24H) + sideEffect, nil
 	}
 	if eventTime.Before(e.MostRecentEventTime) {
 		return "", src.EventFormatError
@@ -88,23 +89,23 @@ func (e *EventReaderWriter) ReadEvent(eventStr string) (string, error) {
 		}
 	}
 
-	var sideEffect *SideEffect
+	var sideEffect string
 	switch eventID {
 	case 1:
-		err = e.EventManager.ClientArrived(clientName)
+		sideEffect = e.ClientArrived(clientName)
 	case 2:
-		err = e.EventManager.ClientSatAtTheDesk(deskNum, clientName, eventTime)
+		sideEffect = e.ClientSatAtTheDesk(deskNum-1, clientName, eventTime)
 	case 3:
 		sideEffect = e.ClientAwaits(clientName, eventTime)
 	case 4:
-		sideEffect, err = e.ClientLeaves(clientName, eventTime)
+		sideEffect = e.ClientLeaves(clientName, eventTime)
 	default:
 		return "", src.EventFormatError
 	}
-	if sideEffect == nil {
+	if len(sideEffect) == 0 {
 		return "", err
 	}
-	return eventTime.String() + sideEffect.String(), err
+	return eventTime.Format(HHMM24H) + " " + sideEffect, err
 }
 
 func Handle(r *bufio.Reader, w io.Writer) error {
@@ -126,70 +127,76 @@ func Handle(r *bufio.Reader, w io.Writer) error {
 		HourlyPrice:         config.Price,
 	}
 
+	// Write opening time
+	fmt.Fprint(w, config.OpeningTime.Format(HHMM24H)+"\n")
+
+	// Handle all events
 	for eventStr, err := r.ReadString('\n'); err == nil; eventStr, err = r.ReadString('\n') {
 		sideEffectStr, err := eventReaderWriter.ReadEvent(eventStr)
-		fmt.Fprintln(w, eventStr)
+		fmt.Fprint(w, eventStr)
 		if errors.Is(err, src.EventFormatError) {
 			break
 		}
-		if err != nil {
-			fmt.Fprintln(w, SideEffect{
-				SideEffectID: 13,
-				ClientName:   "",
-				DeskNumber:   0,
-			})
-		}
 		if len(sideEffectStr) > 0 {
-			fmt.Fprintln(w, sideEffectStr)
+			fmt.Fprint(w, sideEffectStr)
 		}
+	}
+	// Kick out all customers
+	for name, _ := range eventReaderWriter.EventManager.ClientPool.Pool {
+		eventReaderWriter.EventManager.DeskStorage.Free(name, config.ClosingTime)
+		kickOutEvent := fmt.Sprintf("%s %d %s\n", config.ClosingTime.Format(HHMM24H), 11, name)
+		fmt.Fprint(w, kickOutEvent)
+	}
+	// Write closing time
+	fmt.Fprint(w, config.ClosingTime.Format(HHMM24H)+"\n")
+
+	// Write all desks' statistics
+	for i, desk := range eventReaderWriter.EventManager.DeskStorage.Desks {
+		deskInfo := fmt.Sprintf("%d %d %s\n", i+1, desk.Revenue, desk.OccupationTime.Format(HHMM24H))
+		fmt.Fprint(w, deskInfo)
 	}
 	return nil
 }
 
-func (e *EventReaderWriter) ClientAwaits(name string, currentTime time.Time) *SideEffect {
+func (e *EventReaderWriter) ClientArrived(name string) string {
+	if err := e.EventManager.ClientArrived(name); err != nil {
+		return fmt.Sprintf("%d %v\n", 13, err)
+	}
+	return ""
+}
+
+func (e *EventReaderWriter) ClientSatAtTheDesk(deskNum int, name string, currentTime time.Time) string {
+	if err := e.EventManager.ClientSatAtTheDesk(deskNum, name, currentTime); err != nil {
+		return fmt.Sprintf("%d %v\n", 13, err)
+	}
+	return ""
+}
+
+func (e *EventReaderWriter) ClientAwaits(name string, currentTime time.Time) string {
 	if err := e.EventManager.ClientAwaits(name); errors.Is(err, src.QueueIsFull) {
-		return &SideEffect{
-			FormattedTime: currentTime.Format(HHMM24H),
-			SideEffectID:  11,
-			ClientName:    name,
-			DeskNumber:    0,
-		}
+		return fmt.Sprintf("%d %s\n", 11, name)
+	} else if errors.Is(err, src.ICanWaitNoLonger) {
+		return fmt.Sprintf("%d %s\n", 13, err)
 	}
-	return nil
+	return ""
 }
 
-func (e *EventReaderWriter) ClientLeaves(name string, currentTime time.Time) (*SideEffect, error) {
+func (e *EventReaderWriter) ClientLeaves(name string, currentTime time.Time) string {
 	if err := e.EventManager.ClientLeaves(name, currentTime); err != nil {
-		return nil, err
+		return fmt.Sprintf("%d %v\n", 13, err)
 	}
 	deskNum, ok := e.EventManager.DeskStorage.FindAvailable()
 	if !ok {
-		return nil, nil
+		return ""
 	}
 	awaitingClient, ok := e.EventManager.ClientQueue.Dequeue()
 	if !ok {
-		return nil, nil
+		return ""
 	}
 	if err := e.EventManager.ClientSatAtTheDesk(deskNum, awaitingClient, currentTime); err != nil {
-		return nil, err
+		return fmt.Sprintf("%d %v\n", 13, err)
 	}
-	return &SideEffect{
-		FormattedTime: currentTime.Format(HHMM24H),
-		SideEffectID:  12,
-		ClientName:    awaitingClient,
-		DeskNumber:    deskNum,
-	}, nil
-}
-
-type SideEffect struct {
-	FormattedTime string
-	SideEffectID  int
-	ClientName    string
-	DeskNumber    int
-}
-
-func (s SideEffect) String() string {
-	return fmt.Sprintf("%s %d %s %d\n", s.FormattedTime, s.SideEffectID, s.ClientName, s.DeskNumber)
+	return fmt.Sprintf("%d %s %d\n", 12, awaitingClient, deskNum+1)
 }
 
 const HHMM24H = "15:04"

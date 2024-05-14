@@ -23,7 +23,7 @@ func NewDesks(num, price int) *DeskStorage {
 
 func (d *DeskStorage) Occupy(clientName string, deskNum int, occupationTime time.Time) error {
 	if d.AvailableDesks.Get(deskNum) {
-		return DeskIsOccupied
+		return PlaceIsBusy
 	}
 
 	if _, ok := d.OccupiedDesks[clientName]; ok {
