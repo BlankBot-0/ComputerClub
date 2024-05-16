@@ -54,7 +54,7 @@ func (m *EventManager) ClientAwaits(name string) error {
 	if err != nil {
 		return err
 	}
-	err = m.ClientPool.Add(name, Client{
+	err = m.ClientPool.Update(name, Client{
 		Desk:    0,
 		AtQueue: true,
 	})

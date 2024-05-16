@@ -1,14 +1,22 @@
 package main
 
-func main() {
-	//cp := src.NewClientPool()
-	//cq := src.NewClientListQueue()
-	//deskManager := src.NewDesks(5)
-	//
-	//src.NewEventManager(event_manager.Deps{
-	//	ClientPool:  cp,
-	//	DeskManager: deskManager,
-	//	ClientQueue: cq,
-	//})
+import (
+	"bufio"
+	"os"
+)
 
+func main() {
+	args := os.Args[1:]
+
+	f, err := os.Open("./" + args[0])
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	in := bufio.NewReader(f)
+	err = Handle(in, os.Stdout)
+	if err != nil {
+		panic(err)
+	}
 }

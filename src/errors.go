@@ -10,8 +10,4 @@ var ClientUnknown = errors.New("ClientUnknown")
 var ICanWaitNoLonger = errors.New("ICanWaitNoLonger!")
 
 var QueueIsFull = errors.New("queue is full")
-var QueueIsEmpty = errors.New("queue is empty")
 var ClientNotInQueue = errors.New("queue does not contain client")
-
-var DeskIsOccupied = errors.New("desk is occupied")
-var DeskAlreadyFree = errors.New("desk is already free")

@@ -38,11 +38,3 @@ func (cp *ClientPool) Remove(client string) error {
 	delete(cp.Pool, client)
 	return nil
 }
-
-func (cp *ClientPool) ListClients() []string {
-	clients := make([]string, 0, len(cp.Pool))
-	for client := range cp.Pool {
-		clients = append(clients, client)
-	}
-	return clients
-}

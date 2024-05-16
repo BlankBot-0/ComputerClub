@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,27 +29,49 @@ type EventReaderWriter struct {
 	HourlyPrice         int
 }
 
-func ReadInitData(r io.Reader) (*Config, error) {
+func ReadInitData(r *bufio.Reader, w io.Writer) (*Config, error) {
 	var numDesks int
-	_, err := fmt.Fscanln(r, &numDesks)
+	numDesksStr, err := r.ReadString('\n')
 	if err != nil {
+		return nil, err
+	}
+	numDesks, err = strconv.Atoi(numDesksStr[:len(numDesksStr)-1])
+	if err != nil {
+		fmt.Fprint(w, numDesksStr)
 		return nil, err
 	}
 
 	var openingTimeStr, closingTimeStr string
-	_, err = fmt.Fscanln(r, &openingTimeStr, &closingTimeStr)
+	workTimeStr, err := r.ReadString('\n')
 	if err != nil {
 		return nil, err
+	}
+	workTimeStrFields := strings.Fields(workTimeStr)
+	openingTimeStr = workTimeStrFields[0]
+	closingTimeStr = workTimeStrFields[1]
+
+	isCorrectTimeFormat := regexp.MustCompile(`^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$`).MatchString
+	if !isCorrectTimeFormat(openingTimeStr) || !isCorrectTimeFormat(closingTimeStr) {
+		fmt.Fprint(w, workTimeStr)
+		return nil, src.EventFormatError
 	}
 	openingTime, err := time.Parse(HHMM24H, openingTimeStr)
 	if err != nil {
 		return nil, err
 	}
 	closingTime, err := time.Parse(HHMM24H, closingTimeStr)
+	if err != nil {
+		return nil, err
+	}
 
 	var price int
-	_, err = fmt.Fscanln(r, &price)
+	priceStr, err := r.ReadString('\n')
 	if err != nil {
+		return nil, err
+	}
+	price, err = strconv.Atoi(priceStr[:len(priceStr)-1])
+	if err != nil {
+		fmt.Fprint(w, priceStr)
 		return nil, err
 	}
 
@@ -61,6 +85,13 @@ func ReadInitData(r io.Reader) (*Config, error) {
 
 func (e *EventReaderWriter) ReadEvent(eventStr string) (string, error) {
 	eventInfo := strings.Fields(eventStr)
+	if len(eventInfo) < 3 || len(eventInfo) > 4 {
+		return "", src.EventFormatError
+	}
+	if !regexp.MustCompile(`^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$`).MatchString(eventInfo[0]) {
+		return "", src.EventFormatError
+	}
+
 	eventTime, err := time.Parse(HHMM24H, eventInfo[0])
 	if err != nil {
 		return "", err
@@ -72,11 +103,15 @@ func (e *EventReaderWriter) ReadEvent(eventStr string) (string, error) {
 	if eventTime.Before(e.MostRecentEventTime) {
 		return "", src.EventFormatError
 	}
+	e.MostRecentEventTime = eventTime
 	eventID, err := strconv.Atoi(eventInfo[1])
 	if err != nil {
 		return "", src.EventFormatError
 	}
 	clientName := eventInfo[2]
+	if !regexp.MustCompile(`^[A-Za-z0-9\-_]+$`).MatchString(clientName) {
+		return "", src.EventFormatError
+	}
 
 	var deskNum int = -1
 	if len(eventInfo) == 4 {
@@ -108,10 +143,12 @@ func (e *EventReaderWriter) ReadEvent(eventStr string) (string, error) {
 	return eventTime.Format(HHMM24H) + " " + sideEffect, err
 }
 
-func Handle(r *bufio.Reader, w io.Writer) error {
-	config, err := ReadInitData(r)
+func Handle(r *bufio.Reader, wSource io.Writer) error {
+	w := bufio.NewWriter(wSource)
+	config, err := ReadInitData(r, w)
 	if err != nil {
-		return err
+		w.Flush()
+		return nil
 	}
 	eventManager := src.EventManager{
 		ClientPool:  src.NewClientPool(),
@@ -135,18 +172,29 @@ func Handle(r *bufio.Reader, w io.Writer) error {
 		sideEffectStr, err := eventReaderWriter.ReadEvent(eventStr)
 		fmt.Fprint(w, eventStr)
 		if errors.Is(err, src.EventFormatError) {
-			break
+			w = bufio.NewWriter(wSource)
+			fmt.Fprint(w, eventStr)
+			w.Flush()
+			return nil
 		}
 		if len(sideEffectStr) > 0 {
 			fmt.Fprint(w, sideEffectStr)
 		}
 	}
 	// Kick out all customers
+	sortedNames := make([]string, len(eventReaderWriter.EventManager.ClientPool.Pool))
+	i := 0
 	for name, _ := range eventReaderWriter.EventManager.ClientPool.Pool {
+		sortedNames[i] = name
+		i++
+	}
+	sort.Strings(sortedNames)
+	for _, name := range sortedNames {
 		eventReaderWriter.EventManager.DeskStorage.Free(name, config.ClosingTime)
 		kickOutEvent := fmt.Sprintf("%s %d %s\n", config.ClosingTime.Format(HHMM24H), 11, name)
 		fmt.Fprint(w, kickOutEvent)
 	}
+
 	// Write closing time
 	fmt.Fprint(w, config.ClosingTime.Format(HHMM24H)+"\n")
 
@@ -154,6 +202,10 @@ func Handle(r *bufio.Reader, w io.Writer) error {
 	for i, desk := range eventReaderWriter.EventManager.DeskStorage.Desks {
 		deskInfo := fmt.Sprintf("%d %d %s\n", i+1, desk.Revenue, desk.OccupationTime.Format(HHMM24H))
 		fmt.Fprint(w, deskInfo)
+	}
+	err = w.Flush()
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -174,8 +226,9 @@ func (e *EventReaderWriter) ClientSatAtTheDesk(deskNum int, name string, current
 
 func (e *EventReaderWriter) ClientAwaits(name string, currentTime time.Time) string {
 	if err := e.EventManager.ClientAwaits(name); errors.Is(err, src.QueueIsFull) {
+		e.EventManager.ClientLeaves(name, currentTime)
 		return fmt.Sprintf("%d %s\n", 11, name)
-	} else if errors.Is(err, src.ICanWaitNoLonger) {
+	} else if err != nil {
 		return fmt.Sprintf("%d %s\n", 13, err)
 	}
 	return ""
