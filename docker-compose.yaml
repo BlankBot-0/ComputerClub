@@ -1,0 +1,10 @@
+version: "3.1"
+services:
+  computer-club:
+    build: .
+  computer-club-test:
+    build:
+      context: .
+      dockerfile: test.Dockerfile
+    environment:
+      TEST_PATH: /root/test/test_files
