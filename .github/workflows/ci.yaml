@@ -31,4 +31,4 @@ jobs:
           services: |
             computer-club-test
       - name: Test
-        run: docker-compose up
+        run: docker-compose up -d computer-club-test
