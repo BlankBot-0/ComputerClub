@@ -184,12 +184,12 @@ func Handle(r *bufio.Reader, wSource io.Writer) error {
 
 	// Handle all events
 	for eventStr, err := r.ReadString('\n'); err == nil; eventStr, err = r.ReadString('\n') {
-		sideEffectStr, err := eventReaderWriter.ReadEvent(eventStr)
+		sideEffectStr, eventErr := eventReaderWriter.ReadEvent(eventStr)
 		_, err = fmt.Fprint(w, eventStr)
 		if err != nil {
 			return err
 		}
-		if errors.Is(err, src.EventFormatError) {
+		if errors.Is(eventErr, src.EventFormatError) {
 			w = bufio.NewWriter(wSource)
 			_, err := fmt.Fprint(w, eventStr)
 			if err != nil {

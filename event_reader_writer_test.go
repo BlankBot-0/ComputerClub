@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"io"
 	"os"
 	"strings"
 	"testing"
@@ -68,8 +67,18 @@ func TestAllScenarios(t *testing.T) {
 				t.Fatal(err)
 			}
 			outF, err := os.Open(c.OutputPath)
-			defer f.Close()
-			defer outF.Close()
+			defer func() {
+				cerr := f.Close()
+				if cerr != nil {
+					err = cerr
+				}
+			}()
+			defer func() {
+				cerr := outF.Close()
+				if cerr != nil {
+					err = cerr
+				}
+			}()
 
 			in := bufio.NewReader(f)
 			out := &TestWriter{
@@ -97,22 +106,6 @@ type TestWriter struct {
 }
 
 func (t *TestWriter) Write(p []byte) (int, error) {
-	for _, s := range strings.SplitAfter(string(p), "\n") {
-		t.Strings = append(t.Strings, s)
-	}
-	return len(p), nil
-}
-
-type TestReader struct {
-	Strings []string
-	ReadInd int
-}
-
-func (t *TestReader) Read(p []byte) (int, error) {
-	if t.ReadInd >= len(t.Strings) {
-		return 0, io.EOF
-	}
-	p = []byte(t.Strings[t.ReadInd])
-	t.ReadInd++
+	t.Strings = append(t.Strings, strings.SplitAfter(string(p), "\n")...)
 	return len(p), nil
 }
