@@ -12,7 +12,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer f.Close()
+	defer func() {
+		err = f.Close()
+		if err != nil {
+			panic(err)
+		}
+	}()
 
 	in := bufio.NewReader(f)
 	err = Handle(in, os.Stdout)
