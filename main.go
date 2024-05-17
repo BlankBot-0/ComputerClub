@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"os"
+	"yadroTest/src"
 )
 
 func main() {
@@ -20,7 +21,7 @@ func main() {
 	}()
 
 	in := bufio.NewReader(f)
-	err = Handle(in, os.Stdout)
+	err = src.Handle(in, os.Stdout)
 	if err != nil {
 		panic(err)
 	}

@@ -1,4 +1,4 @@
-package main
+package src
 
 import (
 	"bufio"
@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"yadroTest/src"
 )
 
 type Config struct {
@@ -21,7 +20,7 @@ type Config struct {
 }
 
 type EventReaderWriter struct {
-	EventManager        src.EventManager
+	EventManager        EventManager
 	OpeningTime         time.Time
 	ClosingTime         time.Time
 	MostRecentEventTime time.Time
@@ -37,8 +36,7 @@ func ReadInitData(r *bufio.Reader, w io.Writer) (*Config, error) {
 	}
 	numDesks, err = strconv.Atoi(numDesksStr[:len(numDesksStr)-1])
 	if err != nil {
-		_, err := fmt.Fprint(w, numDesksStr)
-		if err != nil {
+		if _, err := fmt.Fprint(w, numDesksStr); err != nil {
 			return nil, err
 		}
 		return nil, err
@@ -59,7 +57,7 @@ func ReadInitData(r *bufio.Reader, w io.Writer) (*Config, error) {
 		if err != nil {
 			return nil, err
 		}
-		return nil, src.EventFormatError
+		return nil, EventFormatError
 	}
 	openingTime, err := time.Parse(HHMM24H, openingTimeStr)
 	if err != nil {
@@ -95,10 +93,10 @@ func ReadInitData(r *bufio.Reader, w io.Writer) (*Config, error) {
 func (e *EventReaderWriter) ReadEvent(eventStr string) (string, error) {
 	eventInfo := strings.Fields(eventStr)
 	if len(eventInfo) < 3 || len(eventInfo) > 4 {
-		return "", src.EventFormatError
+		return "", EventFormatError
 	}
 	if !regexp.MustCompile(`^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$`).MatchString(eventInfo[0]) {
-		return "", src.EventFormatError
+		return "", EventFormatError
 	}
 
 	eventTime, err := time.Parse(HHMM24H, eventInfo[0])
@@ -106,20 +104,20 @@ func (e *EventReaderWriter) ReadEvent(eventStr string) (string, error) {
 		return "", err
 	}
 	if eventTime.Before(e.OpeningTime) || eventTime.After(e.ClosingTime) {
-		sideEffect := fmt.Sprintf(" %d %s\n", 13, src.NotOpenYet)
+		sideEffect := fmt.Sprintf(" %d %s\n", 13, NotOpenYet)
 		return eventTime.Format(HHMM24H) + sideEffect, nil
 	}
 	if eventTime.Before(e.MostRecentEventTime) {
-		return "", src.EventFormatError
+		return "", EventFormatError
 	}
 	e.MostRecentEventTime = eventTime
 	eventID, err := strconv.Atoi(eventInfo[1])
 	if err != nil {
-		return "", src.EventFormatError
+		return "", EventFormatError
 	}
 	clientName := eventInfo[2]
 	if !regexp.MustCompile(`^[A-Za-z0-9\-_]+$`).MatchString(clientName) {
-		return "", src.EventFormatError
+		return "", EventFormatError
 	}
 
 	var deskNum int = -1
@@ -129,22 +127,22 @@ func (e *EventReaderWriter) ReadEvent(eventStr string) (string, error) {
 			return "", err
 		}
 		if deskNum > e.DesksNumber {
-			return "", src.EventFormatError
+			return "", EventFormatError
 		}
 	}
 
 	var sideEffect string
-	switch eventID {
-	case 1:
+	switch EventType(eventID) {
+	case ClientArrived:
 		sideEffect = e.ClientArrived(clientName)
-	case 2:
+	case ClientSatInput:
 		sideEffect = e.ClientSatAtTheDesk(deskNum-1, clientName, eventTime)
-	case 3:
+	case ClientAwaits:
 		sideEffect = e.ClientAwaits(clientName, eventTime)
-	case 4:
+	case ClientLeftInput:
 		sideEffect = e.ClientLeaves(clientName, eventTime)
 	default:
-		return "", src.EventFormatError
+		return "", EventFormatError
 	}
 	if len(sideEffect) == 0 {
 		return "", err
@@ -162,10 +160,10 @@ func Handle(r *bufio.Reader, wSource io.Writer) error {
 		}
 		return nil
 	}
-	eventManager := src.EventManager{
-		ClientPool:  src.NewClientPool(),
-		DeskStorage: src.NewDesks(config.DesksNumber, config.Price),
-		ClientQueue: src.NewClientListQueue(),
+	eventManager := EventManager{
+		ClientPool:  NewClientPool(),
+		DeskStorage: NewDesks(config.DesksNumber, config.Price),
+		ClientQueue: NewClientListQueue(),
 	}
 	eventReaderWriter := &EventReaderWriter{
 		EventManager:        eventManager,
@@ -189,7 +187,7 @@ func Handle(r *bufio.Reader, wSource io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if errors.Is(eventErr, src.EventFormatError) {
+		if errors.Is(eventErr, EventFormatError) {
 			w = bufio.NewWriter(wSource)
 			_, err := fmt.Fprint(w, eventStr)
 			if err != nil {
@@ -221,7 +219,7 @@ func Handle(r *bufio.Reader, wSource io.Writer) error {
 		if err != nil {
 			return err
 		}
-		kickOutEvent := fmt.Sprintf("%s %d %s\n", config.ClosingTime.Format(HHMM24H), 11, name)
+		kickOutEvent := config.ClosingTime.Format(HHMM24H) + " " + ClientLeftEvent(name)
 		_, err = fmt.Fprint(w, kickOutEvent)
 		if err != nil {
 			return err
@@ -251,47 +249,75 @@ func Handle(r *bufio.Reader, wSource io.Writer) error {
 
 func (e *EventReaderWriter) ClientArrived(name string) string {
 	if err := e.EventManager.ClientArrived(name); err != nil {
-		return fmt.Sprintf("%d %v\n", 13, err)
+		return ErrorEvent(err)
 	}
 	return ""
 }
 
 func (e *EventReaderWriter) ClientSatAtTheDesk(deskNum int, name string, currentTime time.Time) string {
 	if err := e.EventManager.ClientSatAtTheDesk(deskNum, name, currentTime); err != nil {
-		return fmt.Sprintf("%d %v\n", 13, err)
+		return ErrorEvent(err)
 	}
 	return ""
 }
 
 func (e *EventReaderWriter) ClientAwaits(name string, currentTime time.Time) string {
-	if err := e.EventManager.ClientAwaits(name); errors.Is(err, src.QueueIsFull) {
-		err := e.EventManager.ClientLeaves(name, currentTime)
-		if err != nil {
+	if err := e.EventManager.ClientAwaits(name); errors.Is(err, QueueIsFull) {
+		if err := e.EventManager.ClientLeaves(name, currentTime); err != nil {
 			return ""
 		}
-		return fmt.Sprintf("%d %s\n", 11, name)
+		return ClientLeftEvent(name)
+
 	} else if err != nil {
-		return fmt.Sprintf("%d %s\n", 13, err)
+		return ErrorEvent(err)
 	}
+
 	return ""
 }
 
 func (e *EventReaderWriter) ClientLeaves(name string, currentTime time.Time) string {
 	if err := e.EventManager.ClientLeaves(name, currentTime); err != nil {
-		return fmt.Sprintf("%d %v\n", 13, err)
+		return ErrorEvent(err)
 	}
 	deskNum, ok := e.EventManager.DeskStorage.FindAvailable()
 	if !ok {
 		return ""
 	}
+
 	awaitingClient, ok := e.EventManager.ClientQueue.Dequeue()
 	if !ok {
 		return ""
 	}
+
 	if err := e.EventManager.ClientSatAtTheDesk(deskNum, awaitingClient, currentTime); err != nil {
-		return fmt.Sprintf("%d %v\n", 13, err)
+		return ErrorEvent(err)
 	}
-	return fmt.Sprintf("%d %s %d\n", 12, awaitingClient, deskNum+1)
+
+	return ClientSatEvent(awaitingClient, deskNum)
+}
+
+func ClientLeftEvent(name string) string {
+	return fmt.Sprintf("%d %s\n", ClientLeft, name)
+}
+
+func ErrorEvent(err error) string {
+	return fmt.Sprintf("%d %v\n", EventError, err)
+}
+
+func ClientSatEvent(name string, deskNum int) string {
+	return fmt.Sprintf("%d %s %d\n", ClientSatAtTheDesk, name, deskNum+1)
 }
 
 const HHMM24H = "15:04"
+
+type EventType int
+
+const (
+	ClientArrived EventType = iota + 1
+	ClientSatInput
+	ClientAwaits
+	ClientLeftInput
+	ClientLeft EventType = iota + 7
+	ClientSatAtTheDesk
+	EventError
+)
