@@ -37,7 +37,10 @@ func ReadInitData(r *bufio.Reader, w io.Writer) (*Config, error) {
 	}
 	numDesks, err = strconv.Atoi(numDesksStr[:len(numDesksStr)-1])
 	if err != nil {
-		fmt.Fprint(w, numDesksStr)
+		_, err := fmt.Fprint(w, numDesksStr)
+		if err != nil {
+			return nil, err
+		}
 		return nil, err
 	}
 
@@ -52,7 +55,10 @@ func ReadInitData(r *bufio.Reader, w io.Writer) (*Config, error) {
 
 	isCorrectTimeFormat := regexp.MustCompile(`^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$`).MatchString
 	if !isCorrectTimeFormat(openingTimeStr) || !isCorrectTimeFormat(closingTimeStr) {
-		fmt.Fprint(w, workTimeStr)
+		_, err := fmt.Fprint(w, workTimeStr)
+		if err != nil {
+			return nil, err
+		}
 		return nil, src.EventFormatError
 	}
 	openingTime, err := time.Parse(HHMM24H, openingTimeStr)
@@ -71,7 +77,10 @@ func ReadInitData(r *bufio.Reader, w io.Writer) (*Config, error) {
 	}
 	price, err = strconv.Atoi(priceStr[:len(priceStr)-1])
 	if err != nil {
-		fmt.Fprint(w, priceStr)
+		_, err := fmt.Fprint(w, priceStr)
+		if err != nil {
+			return nil, err
+		}
 		return nil, err
 	}
 
@@ -147,7 +156,10 @@ func Handle(r *bufio.Reader, wSource io.Writer) error {
 	w := bufio.NewWriter(wSource)
 	config, err := ReadInitData(r, w)
 	if err != nil {
-		w.Flush()
+		err := w.Flush()
+		if err != nil {
+			return err
+		}
 		return nil
 	}
 	eventManager := src.EventManager{
@@ -165,43 +177,70 @@ func Handle(r *bufio.Reader, wSource io.Writer) error {
 	}
 
 	// Write opening time
-	fmt.Fprint(w, config.OpeningTime.Format(HHMM24H)+"\n")
+	_, err = fmt.Fprint(w, config.OpeningTime.Format(HHMM24H)+"\n")
+	if err != nil {
+		return err
+	}
 
 	// Handle all events
 	for eventStr, err := r.ReadString('\n'); err == nil; eventStr, err = r.ReadString('\n') {
 		sideEffectStr, err := eventReaderWriter.ReadEvent(eventStr)
-		fmt.Fprint(w, eventStr)
+		_, err = fmt.Fprint(w, eventStr)
+		if err != nil {
+			return err
+		}
 		if errors.Is(err, src.EventFormatError) {
 			w = bufio.NewWriter(wSource)
-			fmt.Fprint(w, eventStr)
-			w.Flush()
+			_, err := fmt.Fprint(w, eventStr)
+			if err != nil {
+				return err
+			}
+			err = w.Flush()
+			if err != nil {
+				return err
+			}
 			return nil
 		}
 		if len(sideEffectStr) > 0 {
-			fmt.Fprint(w, sideEffectStr)
+			_, err := fmt.Fprint(w, sideEffectStr)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	// Kick out all customers
 	sortedNames := make([]string, len(eventReaderWriter.EventManager.ClientPool.Pool))
 	i := 0
-	for name, _ := range eventReaderWriter.EventManager.ClientPool.Pool {
+	for name := range eventReaderWriter.EventManager.ClientPool.Pool {
 		sortedNames[i] = name
 		i++
 	}
 	sort.Strings(sortedNames)
 	for _, name := range sortedNames {
-		eventReaderWriter.EventManager.DeskStorage.Free(name, config.ClosingTime)
+		err := eventReaderWriter.EventManager.DeskStorage.Free(name, config.ClosingTime)
+		if err != nil {
+			return err
+		}
 		kickOutEvent := fmt.Sprintf("%s %d %s\n", config.ClosingTime.Format(HHMM24H), 11, name)
-		fmt.Fprint(w, kickOutEvent)
+		_, err = fmt.Fprint(w, kickOutEvent)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Write closing time
-	fmt.Fprint(w, config.ClosingTime.Format(HHMM24H)+"\n")
+	_, err = fmt.Fprint(w, config.ClosingTime.Format(HHMM24H)+"\n")
+	if err != nil {
+		return err
+	}
 
 	// Write all desks' statistics
 	for i, desk := range eventReaderWriter.EventManager.DeskStorage.Desks {
 		deskInfo := fmt.Sprintf("%d %d %s\n", i+1, desk.Revenue, desk.OccupationTime.Format(HHMM24H))
-		fmt.Fprint(w, deskInfo)
+		_, err := fmt.Fprint(w, deskInfo)
+		if err != nil {
+			return err
+		}
 	}
 	err = w.Flush()
 	if err != nil {
@@ -226,7 +265,10 @@ func (e *EventReaderWriter) ClientSatAtTheDesk(deskNum int, name string, current
 
 func (e *EventReaderWriter) ClientAwaits(name string, currentTime time.Time) string {
 	if err := e.EventManager.ClientAwaits(name); errors.Is(err, src.QueueIsFull) {
-		e.EventManager.ClientLeaves(name, currentTime)
+		err := e.EventManager.ClientLeaves(name, currentTime)
+		if err != nil {
+			return ""
+		}
 		return fmt.Sprintf("%d %s\n", 11, name)
 	} else if err != nil {
 		return fmt.Sprintf("%d %s\n", 13, err)
