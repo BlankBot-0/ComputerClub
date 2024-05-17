@@ -3,12 +3,16 @@ package src
 import (
 	"bufio"
 	"os"
+	"path"
 	"strings"
 	"testing"
 )
 
 func TestAllScenarios(t *testing.T) {
-	testsPath := "./../test_files/"
+	testsPath := os.Getenv("TEST_PATH")
+	if testsPath == "" {
+		testsPath = "./../test/test_files/"
+	}
 	cases := []struct {
 		InputPath          string
 		ExpectedOutputPath string
@@ -16,17 +20,17 @@ func TestAllScenarios(t *testing.T) {
 	}{
 		{
 			InputPath:          "test_file.txt",
-			ExpectedOutputPath: "output/test_output_file.txt",
+			ExpectedOutputPath: "outputs/test_output_file.txt",
 			Name:               "BasicTest",
 		},
 		{
 			InputPath:          "test_2.txt",
-			ExpectedOutputPath: "output/test_2.txt",
+			ExpectedOutputPath: "outputs/test_2.txt",
 			Name:               "Test2",
 		},
 		{
 			InputPath:          "test_3.txt",
-			ExpectedOutputPath: "output/test_3.txt",
+			ExpectedOutputPath: "outputs/test_3.txt",
 			Name:               "Test3",
 		},
 		{
@@ -64,11 +68,14 @@ func TestAllScenarios(t *testing.T) {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
-			f, err := os.Open(testsPath + c.InputPath)
+			f, err := os.Open(path.Join(testsPath, c.InputPath))
 			if err != nil {
 				t.Fatal(err)
 			}
-			outF, err := os.Open(testsPath + c.ExpectedOutputPath)
+			outF, err := os.Open(path.Join(testsPath, c.ExpectedOutputPath))
+			if err != nil {
+				t.Fatal(err)
+			}
 			defer f.Close()
 			defer outF.Close()
 
